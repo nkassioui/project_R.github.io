@@ -1,0 +1,374 @@
+---
+title: "Projet_R_VF"
+author: "Nasser Kassioui"
+date: "2024-12-11"
+output:
+  pdf_document: default
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Lecture Base 
+
+````{r options}
+#Charger les librairies nécessaires
+
+library(data.table)
+library(dplyr)
+file_path <- "C:\\Users\\kassi\\OneDrive\\Bureau\\M1 IREF\\Projet R\\emp_offers_fmtNV.tsv"
+
+
+# Afficher la structure et un aperçu des premières lignes
+unique(emp_offers_fmtNV)
+
+# Convertir en data.table
+setDT(emp_offers_fmtNV)
+base_emp_new <- emp_offers_fmtNV #la nouvelle base -> "base_emp"
+
+
+#taille
+
+length(base_emp_new$entreprise)
+````
+
+## 2.4 Offre d'emploi 
+
+3720 entreprises => lenght
+
+La nouvelle base => 'base_emp'
+Je commence par traiter la partie "firm_name":
+
+1) Harmonisation des noms d'entreprises:
+   
+   a) Mettre nom en Majuscule 
+   b) supprimer les suffixes superflus + espace superflus 
+   c) supprimer les NA collonnes 'firme name'
+
+
+
+## Code harmonisation:
+
+
+```{r firm_name_harmonisation}
+
+# a) Mettre les noms en majuscules et supprimer les espaces superflus
+base_emp_new[, firm_name := entreprise] #creation firm name
+base_emp_new[, firm_name := toupper(trimws(firm_name))]
+
+unique(base_emp_new)
+length(base_emp_new$firm_name)
+
+
+# Supprimer les lignes où `firm_name` est NA ou vide
+base_emp_new <- base_emp_new[!is.na(firm_name) & firm_name != ""] # on passe à 3032 entreprise
+
+
+
+get_first_word <- function(text) {
+  text <- trimws(text)  # Supprimer les espaces superflus
+  words <- unlist(strsplit(text, "\\s+"))  # Diviser en utilisant un ou plusieurs espaces
+  if (length(words) == 0) return("")  # Retourner une chaîne vide si aucun mot n'est trouvé
+  return(words[1])  # Retourner le premier mot
+}
+base_emp_new[, firm_name := sapply(firm_name, get_first_word)]
+
+
+#le nombre d'ent reste pareil=> pb nom composer 
+
+#Apres la fonction identiefier des noms supprimer important pour réintegrer
+
+# Liste des noms importants à identifier
+noms_importants <- c(
+  "CRÉDIT MUTUEL", "AGRICOLE", "RICARD", "DIOR", "THORNTON", "VERITAS", 
+  "SEB", "MACLOU", "PSA", "ROULLIER", "ORTEC","DARTY", "DUBREUIL", "LAFAYETTE"
+)
+
+# Réintégrer les mots importants
+# Supprimer le premier mot pour créer `words_removed`
+base_emp_new[, words_removed := trimws(sub(paste0("^", firm_name, "\\s*"), "", firm_name))]
+
+# Réintégrer les mots supprimés dans 'first_word' si importants
+base_emp_new[, firm_name := ifelse(
+  words_removed %in% noms_importants,
+  paste(firm_name, words_removed),
+  firm_name
+)]
+
+unique(base_emp_new)
+# Afficher les valeurs uniques des colonnes firm_name et first_word
+unique(base_emp[, .(firm_name, first_word)])
+
+# Afficher les valeurs uniques des colonnes firm_name et first_word
+unique(base_emp[, .(firm_name, first_word)])
+
+
+
+
+
+
+```
+
+'Firm_name a bien été crée avec peut etre l'algo de suppresion a revoir 
+
+On passe maintenat sur 'n_offres'
+
+On calcule le nombre de fois que chaque entreprise à publier utilisation de la fonction .N puis création d'une nouvelle colonne associé car à la fin on veut une entreprise = une ligne 
+
+```{r n_offres}
+# Calculer le nombre d'apparitions de chaque entreprise
+base_emp_new[, n_offres := .N, by = firm_name]
+
+# Supprimer les doublons pour conserver une seule ligne par entreprise avec la 
+
+# Trier les entreprises par nombre d'offres décroissant (facultatif)
+df_summary <- df_summary[order(-n_offres)]
+
+# Vérification des résultats
+sum(df_summary$n_offres)
+unique(df_summary)
+
+```
+La nouvelle colonone a bien été pris en compte on retoruve bine 3032 en faisant la somme des n_offres ce qui montre que tous se passe bien 
+
+On passe maintentant sur la varibale experience requise  avg_req_exp:
+
+_Consigne_: Expérience. Au sein de toutes les offres d’une même entreprise, quelle est l’expérience moyenne demandée. Ignorez les valeurs manquantes. Si toutes les valeurs sont manquantes, alors cettevariable est manquante. 
+
+```` {r avg_req_exp}
+# Calculer l'expérience moyenne demandée (avg_req_exp) par entreprise
+base_emp_new[, avg_req_exp := ifelse(
+  all(is.na(experience_requise)),  # Si toutes les valeurs sont NA pour une entreprise
+  NA,                              # Attribuer NA
+  mean(experience_requise, na.rm = TRUE)  # Sinon, calculer la moyenne en ignorant les NA
+), by = firm_name]
+
+
+# Créer un dataframe avec une seule ligne par entreprise
+df_summary <- unique(base_emp_new[, .(firm_name, n_offres, avg_req_exp)])
+
+# Trier les résultats par nombre d'offres décroissant (facultatif)
+df_summary <- df_summary[order(-n_offres)]
+
+# Vérifier les résultats
+head(df_summary)
+
+unique(df_summary)
+
+
+
+````
+
+La variable 'avg_req_exp'a bien été crée les résultats sont concluents 
+
+Nous passons sur la variable #top_skill_req compétence
+
+_consigne_:
+Les compétences demandées sont au format suivant, ex: "SQL, Spark, Git,
+database, équipe, Esprit Critique, Collaboration". C’est à dire que chaque compétence est séparée par une virgule.
+Les entreprises proposent plusieurs offre d’emploi. La variable top_skill_req rapporte les compétences qui apparaissent le plus au sein de toutes les offres.
+ Exemple
+ Si une entreprise a deux offres d’emploi qui listent les compétences suivantes:
+ • "SQL, Spark, Git, Database, équipe, Esprit Critique, Collaboration"
+ • "SQL, Statistique, Power BI, Collaboration"
+ Alors la variable top_skill_req = "SQL, Collaboration". L’ordre des compétences au sein de la chaine de caractères n’a pas d’importance
+ 
+Étapes pour calculer top_skill_req
+Séparer les compétences :
+
+Transformez la chaîne de caractères en une liste de compétences.
+Utilisez la virgule comme séparateur.
+Compter les occurrences des compétences :
+
+Regroupez par entreprise.
+Comptez la fréquence de chaque compétence au sein de toutes les offres pour cette entreprise.
+Identifier les compétences les plus fréquentes :
+
+Sélectionnez les compétences ayant le maximum d'occurrences.
+Créer la colonne top_skill_req :
+
+Combinez les compétences les plus fréquentes en une chaîne de caractères séparée par des virgules.
+
+```{r avg_req_exp1}
+
+# Étape 1 : Séparer les compétences pour chaque entreprise
+# Convertir les compétences en liste longue (chaque ligne = une compétence unique)
+# Étape 1 : Séparer les compétences pour chaque entreprise
+base_emp_long <- base_emp_new[, .(
+  skill = unlist(strsplit(competences_requises, ",\\s*"))  # Séparer les compétences par virgule et espace
+), by = .(firm_name)]
+
+# Étape 2 : Compter les occurrences des compétences pour chaque entreprise
+skill_counts <- base_emp_long[, .N, by = .(firm_name, skill)]  # Compter les compétences par entreprise
+
+# Étape 3 : Identifier les compétences les plus fréquentes par entreprise
+top_skills <- skill_counts[, .SD[N == max(N)], by = firm_name]  # Compétences avec la fréquence maximale
+
+# Étape 4 : Combiner les compétences les plus fréquentes pour chaque entreprise
+top_skills_combined <- top_skills[, .(
+  top_skill_req = paste(skill, collapse = ", ")  # Combiner les compétences
+), by = firm_name]
+
+# Étape 5 : Ajouter la colonne `top_skill_req` à `base_emp`
+base_emp_new <- merge(base_emp_new, top_skills_combined, by = "firm_name", all.x = TRUE)
+
+# Vérifier les résultats
+head(base_emp_new[, .(firm_name, competences_requises, top_skill_req)])  # Aperçu des colonnes importantes
+
+head(base_emp_new)
+unique(base_emp_new)
+length(base_emp_new$top_skills_req)
+#### Étape 6 : Regrouper toutes les nouvelles variables dans un dataframe par entreprise ####
+df_summary <- base_emp_new[, .(
+  n_offres = .N,  # Nombre total d'offres par entreprise
+  avg_req_exp = mean(experience_requise, na.rm = TRUE),  # Moyenne de l'expérience requise
+  top_skill_req = unique(top_skill_req)  # Compétences les plus fréquentes
+), by = firm_name]
+
+# Trier les résultats par nombre d'offres décroissant (facultatif)
+df_summary <- df_summary[order(-n_offres)]
+
+# Vérifier les résultats
+head(df_summary)
+
+```
+
+ La variable top_skill_req a bien été crée et tous semble fonctionner 
+ 
+ On passe sur la variable *addr_dept_main* département de principale de l'entreprise  pour cela on va chercher le nombre d'occurence de chaque département pusi prendre celui avec le plus de'occurence 
+ 
+````{r addr_dep_main}
+#### Étape 1 : Compter les occurrences des départements pour chaque entreprise ####
+dept_counts <- base_emp_new[, .N, by = .(firm_name, departement)]  # Compter les occurrences des départements
+
+#### Étape 2 : Identifier le département avec le plus d'occurrences pour chaque entreprise ####
+main_dept <- dept_counts[, .SD[N == max(N)], by = firm_name]  # Identifier le ou les départements principaux
+
+#### Étape 3 : Combiner les départements principaux (en cas d'égalité) ####
+main_dept_combined <- main_dept[, .(
+  addr_dept_main = paste(departement, collapse = ", ")  # Combiner les départements en cas d'égalité
+), by = firm_name]
+
+#### Étape 4 : Ajouter la colonne addr_dept_main à la base principale ####
+df_summary <- base_emp_new[, .(
+  n_offres = .N,  # Nombre total d'offres
+  avg_req_exp = mean(experience_requise, na.rm = TRUE)  # Moyenne de l'expérience requise
+), by = firm_name]
+
+# Ajouter la variable addr_dept_main
+df_summary <- merge(df_summary, main_dept_combined, by = "firm_name", all.x = TRUE)
+
+#### Étape 5 : Trier les résultats (facultatif) ####
+df_summary <- df_summary[order(-n_offres)]  # Trier par nombre d'offres décroissant
+
+#### Étape 6 : Vérifier les résultats ####
+# Aperçu du dataframe avec une ligne par entreprise
+head(df_summary)
+
+````
+Départements à bien été définis aucune valeur n'est perdu 
+
+On passe maintenant par la variable *avg_wage* qui est le  salaire annuel moyen des offres proposées, doit être une variable numérique sachant que la varibale s'appellle 'salaire' dans la base.
+
+_consigne du prof_:
+Salaire. Le salaire est rempli par les entreprises dans un format libre. Ex: "Salaire : 55K à 60K€"
+ ou "50 000 - 63 000 EUR par an". Il faudra convertir au format numérique. Les étapes sont les
+ suivantes:
+ 1. transformer la chaine de caractère pour qu’elle affiche uniquement un nombre
+ 2. convertir la chaine de caractère en numérique
+ A noter: dans les exemple du dessus il y a une fourchette de salaire. Vous pouvez vous contenter
+ de ne prendre qu’un des deux nombres. Calculer la moyenne est mieux mais vous n’êtes pas obligé
+ de le faire pour avoir le maximum de points.
+ 
+```` {r avg_wage}
+#### Étape 1 : Extraire et nettoyer les valeurs de salaire ####
+
+# Fonction pour extraire la moyenne de la fourchette de salaire
+extract_salary <- function(salaire) {
+  
+  
+  # Remplacer les séparateurs de milliers (espaces, points, etc.) par rien
+  salaire_clean <- gsub("[^0-9\\-]", "", salaire)  # Garder uniquement les chiffres et les tirets
+  salaire_split <- unlist(strsplit(salaire_clean, "-"))  # Séparer la fourchette (ex: "50000-60000")
+  salaire_numeric <- as.numeric(salaire_split)  # Convertir en numérique
+  
+  # Si une fourchette est présente, calculer la moyenne
+  if (length(salaire_numeric) == 2) {
+    return(mean(salaire_numeric, na.rm = TRUE))
+  } else if (length(salaire_numeric) == 1) {
+    return(salaire_numeric)  # Retourner le salaire unique
+  } else {
+    return(NA)  # Si aucune valeur valide, retourner NA
+  }
+}
+
+# Appliquer la fonction à la colonne `salaire`
+base_emp_new[, salaire_clean := sapply(salaire, extract_salary)]
+
+#### Étape 2 : Calculer le salaire annuel moyen par entreprise ####
+avg_wage_by_firm <- base_emp_new[, .(
+  avg_wage = mean(salaire_clean, na.rm = TRUE)  # Calculer la moyenne des salaires par entreprise
+), by = firm_name]
+
+#### Étape 3 : Créer un dataframe avec une ligne par entreprise ####
+
+
+# Ajouter la colonne `avg_wage`
+df_summary <- merge(df_summary, avg_wage_by_firm, by = "firm_name", all.x = TRUE)
+
+#### Étape 4 : Vérifier les résultats ####
+# Exemple de visualisation des colonnes importantes
+head(df_summary)
+
+#### Étape 5 : Trier par nombre d'offres (facultatif) ####
+df_summary <- df_summary[order(-n_offres)]
+
+#### Étape 6 : Vérification finale ####
+# Résultat attendu avec une ligne par entreprise
+head(df_summary)
+
+````
+Cela ne ressort pas la bonne sortie valeur bizzare à revoir
+
+dernière varibale *sector_main* qui est le secteur principal d'activité le nombre d'occurence le plus haut la varibale s'appelle *secteur* dans la base si toutes les offre sont NA on laisse NA
+
+```` {r sector_main}
+#### Étape 1 : Compter les occurrences des secteurs pour chaque entreprise ####
+sector_counts <- base_emp_new[, .N, by = .(firm_name, secteur)]  # Compter les occurrences des secteurs
+
+#### Étape 2 : Identifier le secteur principal avec le plus d'occurrences ####
+sector_main <- base_emp_new[, .(
+  sector_main = if (all(is.na(secteur))) {
+    as.character(NA)  # Retourner NA en tant que caractère
+  } else {
+    secteur[which.max(tabulate(match(secteur, unique(secteur))))]
+  }
+), by = firm_name]
+
+#### Étape 3 : Ajouter la colonne `sector_main` à `base_emp_new` ####
+base_emp_new <- merge(base_emp_new, sector_main, by = "firm_name", all.x = TRUE)
+unique(base_emp_new)
+
+#### Étape 4 : Créer un dataframe final avec une ligne par entreprise ####
+df_summary <- base_emp_new[, .(
+  n_offres = .N,  # Nombre total d'offres
+  avg_req_exp = mean(experience_requise, na.rm = TRUE),  # Moyenne de l'expérience requise
+  addr_dept_main = unique(addr_dept_main),  # Département principal
+  avg_wage = mean(salaire_clean, na.rm = TRUE),  # Salaire moyen
+  sector_main = unique(sector_main)  # Secteur principal
+), by = firm_name]
+
+#### Étape 5 : Trier par nombre d'offres (facultatif) ####
+df_summary <- df_summary[order(-n_offres)]
+
+#### Étape 6 : Vérifier les résultats ####
+# Visualisation des colonnes importantes
+head(df_summary)
+
+
+
+````
+
